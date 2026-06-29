@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>AetherCanvas - CPU + GPU 복합 과부하 테스트</title>
+    <style>
+        body { font-family: sans-serif; background: #0a0a0c; color: #ffffff; text-align: center; margin: 0; padding: 20px; overflow: hidden; }
+        .control-panel { background: rgba(30, 30, 30, 0.85); padding: 20px; border-radius: 15px; display: inline-block; position: absolute; top: 20px; left: 50%; transform: translateX(-50%); z-index: 10; backdrop-filter: blur(10px); box-shadow: 0 4px 20px rgba(0,0,0,0.7); }
+        button { background: #3867d6; color: white; border: none; padding: 12px 25px; font-size: 16px; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 10px; }
+        button:hover { background: #4b7bec; }
+        .status { font-size: 18px; color: #05c46b; margin: 5px 0; }
+        canvas { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+    </style>
+</head>
+<body>
+
+    <div class="control-panel">
+        <h2>AetherCanvas 성능 테스트 2단계</h2>
+        <div class="status">감지된 CPU 코어 수: <span id="cores">0</span>개</div>
+        <div class="status" style="color: #ffa801;">현재 화면 입자 수: <span id="particleCount">0</span>개</div>
+        <button id="startBtn" onclick="toggleTest()">성능 극대화 (CPU + GPU 풀가동)</button>
+        <p style="color:#ff5e57; margin: 5px 0 0 0; font-size: 12px;">※ 그래픽 카드와 CPU를 동시에 테스트합니다.</p>
+    </div>
+
+    <canvas id="gpuCanvas"></canvas>
+
+    <script>
+        // --- 1. CPU 연산 세팅 (1단계 우회 코드 포함) ---
+        const coreCount = navigator.hardwareConcurrency || 2;
+        document.getElementById('cores').innerText = coreCount;
+        let workers = [];
+        let isRunning = false;
+
+        const workerCode = `
+            function heavyCalculation() {
+                let i = 0; while (true) { Math.sqrt(i) * Math.sqrt(i); i++; }
+            }
+            heavyCalculation();
+        `;
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const workerUrl = URL.createObjectURL(blob);
+
+        // --- 2. GPU 연산 세팅 (HTML5 Canvas 그래픽스) ---
+        const canvas = document.getElementById('gpuCanvas');
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // 입자(Particle) 구조 설계
+        class Particle {
+            constructor() {
+                this.x = Math.random() * canvas.width;
+                this.y = Math.random() * canvas.height;
+                this.vx = (Math.random() - 0.5) * 5;
+                this.vy = (Math.random() - 0.5) * 5;
+                this.radius = Math.random() * 2 + 1;
+                this.color = `hsl(${Math.random() * 360}, 100%, 60%)`;
+            }
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                if (this.x < 0 || this.x > canvas.width) this.vx *= -1;
+                if (this.y < 0 || this.y > canvas.height) this.vy *= -1;
+            }
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+            }
+        }
+
+        // 무한 그래픽 렌더링 루프 (GPU 가속 유도)
+        function animate() {
+            if (!isRunning) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                return;
+            }
+            
+            ctx.fillStyle = 'rgba(10, 10, 12, 0.2)'; // 잔상 효과
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 매 프레임마다 입자를 대량으로 추가하여 하드웨어 압박
+            if (particles.length < 15000) { 
+                for(let i=0; i<100; i++) particles.push(new Particle());
+            }
+            document.getElementById('particleCount').innerText = particles.length;
+
+            particles.forEach(p => {
+                p.update();
+                p.draw();
+            });
+
+            requestAnimationFrame(animate);
+        }
+
+        // --- 3. 제어 스위치 ---
+        function toggleTest() {
+            const btn = document.getElementById('startBtn');
+            
+            if (!isRunning) {
+                isRunning = true;
+                // CPU 가동
+                for (let i = 0; i < coreCount; i++) {
+                    workers.push(new Worker(workerUrl));
+                }
+                // GPU 가동
+                animate();
+                
+                btn.innerText = "테스트 중지";
+                btn.style.background = "#57606f";
+            } else {
+                isRunning = false;
+                // CPU 중지
+                workers.forEach(w => w.terminate());
+                workers = [];
+                // GPU 중지 및 초기화
+                particles = [];
+                document.getElementById('particleCount').innerText = 0;
+                
+                btn.innerText = "성능 극대화 (CPU + GPU 풀가동)";
+                btn.style.background = "#3867d6";
+            }
+        }
+    </script>
+</body>
+</html>
